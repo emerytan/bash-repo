@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 #globals
 srcBase=$(basename $1)
 tempDir="/Users/$USER/duplicateFinder"
@@ -15,7 +16,7 @@ if [ ! -d "$1" ]; then
 fi
 
 echo -e "\n\n"
-echo -e "this script will recursivels create md5's, match duplicates, then create a logfile.\n"
+echo -e "this script will recursively create md5's, match duplicates, then create a logfile.\n"
 
 #echo -e "cleaning out old md5's.\nremoving:"
 #rm -rfv $tempDir/*
