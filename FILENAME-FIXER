@@ -1,0 +1,115 @@
+#!/bin/bash
+# sanitize filenames
+# finder allows "/" in directories and filenames but they appear as ":" in shell commands
+# this means files/directories with "/" or any other special character can be created in finder
+# shell commands will fail if/ when cp or rsync are to move said files
+# we need to replace these characters with "_" or "-" or something else
+
+# Globals
+fullDate=$(date "+%Y%m%d-%H%M")
+FIND="find . -name "*[^A-Za-Z0-9\-\_\.]*" -type f"
+#MockDirPath="/Users/$USER/sanitizier/fix-dirs/MockDirs"
+#MockDir="/Users/$USER/sanitizier/fix-dirs/MockDirs/DIRNAMES.txt"
+#
+# Get directory to be hashed
+clear
+tput setaf 11
+echo -e "|--->    bad names sanitizier    <---|"
+tput setaf 9
+echo -e "|--->    fix bad filenames     <---|"
+tput sgr 0
+echo -e "\nThis utility will search for and remove colons in file names.\nThe colon will be replaced with an underscore."
+echo -e "\nProcess is as follows: "
+echo -e "\t1. define directory to be cleaned up."
+echo -e "\t2. preview files to be renamed."
+#echo -e "\t3. rename intended directory if preview and test are successful."
+echo -e -n "\ndrop directory to be cleaned up: "
+read -e DROP
+src_base=$(basename "$DROP")
+LogPath="/Users/$USER/sanitizier/fix-dirs/"$src_base""
+mkdir -p "$LogPath"
+LOG=""$LogPath"/"$src_base"-$fullDate.txt"
+
+echo "$LOG"
+sleep 5
+
+touch "$LOG"
+cd "$DROP"
+
+FileCount=$(find . -type f | wc -l | awk '{ print $1 }')
+BFN=$(find . -name "*[^A-Za-Z0-9\-\_\.]*" -type f -print0 | xargs -0 -n 1 >"$LOG")
+COUNT=$(wc -l "$LOG" | awk '{ print $1 }')
+tput setaf 9
+echo -e "\n\n\tWorking directory: "$src_base" "
+tput setaf 11
+echo -e "\tfile count prior to sanitizaion:\t\t\t$FileCount "
+if [ "$COUNT" != "0" ]; then
+        echo -e "\tnumber of items to be cleaned up:\t\t\t$COUNT "
+else
+        echo -e "\tnumber of items to be cleaned up:$(tput setaf 10)\t\t\t$COUNT "
+        rm -rf "$LOG"
+        tput sgr 0
+        echo -e "\n\nNo Bad filenames found - exiting script."
+        echo -e "\n\n"
+        sleep 3
+        exit
+fi
+tput sgr 0
+#echo -e "\n\tmock directory structure can be found at this path: \n\t"$MockDirPath""
+echo -e -n "\nready to preview? (y) to continue: "
+read CNF
+if [ "$CNF" != "y" ]; then
+        echo -e "Have a nice day\n"
+        rm -rf "$LOG"
+
+        exit
+else
+        #       mkdir -p "$MockDirPath"
+        cd "$DROP"
+        #      find . -type d -print0 | xargs -0 -n 1 >> "$MockDir"
+        #     cd "$MockDirPath"
+        #    sort -b DIRNAMES.txt | while read DIRname; do DIR="${DIRname}"; mkdir -p "$DIR"; done
+        echo -e "\n\nPreview of "$src_base" files to be renamed\n\n" | tee -a "$LOG"
+        #cd "$MockDirPath"
+        find . -name "*[^A-Za-Z0-9\-\_\.]*" -type f | while read FILEDIR; do
+                DIR="${FILEDIR%/*}"
+                FILE="${FILEDIR/*\//}"
+                NEWFILE="${FILE//:/_}"
+                echo -e "\n"$DIR/$FILE"\t-->\n"$DIR/$NEWFILE"\t<--\n" | tee -a "$LOG"
+        done
+fi
+
+echo -e -n "\nready to rename everything? (y) to continue: "
+read CNF
+if [ "$CNF" != "y" ]; then
+        echo -e "Have a nice day\n"
+        rm -rf "$LOG"
+        exit
+else
+        #cd "$MockDirPath"
+        find . -name "*[^A-Za-Z0-9\-\_\.]*" -type f | while read FILEDIR; do
+                DIR="${FILEDIR%/*}"
+                FILE="${FILEDIR/*\//}"
+                NEWFILE="${FILE//:/_}"
+                mv -n "$DIR"/"$FILE" "$DIR"/"$NEWFILE"
+        done
+fi
+#cd "$MockDirPath"
+PLOG=$LogPath"/"$src_base"-fixed-$fullDate.txt"
+PostFileCount=$(find . -type f | wc -l | awk '{ print $1 }')
+BFN=$(find . -name "*[^A-Za-Z0-9\-\_\.]*" -type f -print0 | xargs -0 -n 1 >"$PLOG")
+COUNT=$(wc -l "$PLOG" | awk '{ print $1 }')
+
+tput setaf 9
+echo -e "\n\n\tWorking directory: "$src_base" "
+tput setaf 11
+echo -e "\tfile count pre sanitizaion:\t\t$FileCount "
+echo -e "\tfile count post sanitizaion:\t\t$PostFileCount "
+echo -e "\tnumber of items to be cleaned up:\t$COUNT "
+tput sgr 0
+echo -e -n "\nany key to exit: "
+read -n 1
+echo -e "\n\n"
+rm -rf "$PLOG"
+rm -rf "$LOG"
+exit

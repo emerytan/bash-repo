@@ -1,0 +1,109 @@
+#!/bin/bash
+# sanitize filenames
+# finder allows "/" in directories and filenames but they appear as ":" in shell commands
+# this means files/directories with "/" or any other special character can be created in finder
+# shell commands will fail if/ when cp or rsync are to move said files
+# we need to replace these characters with "_" or "-" or something else
+# this script will find all directories with special characters and replace them with "_"
+
+# Globals
+fullDate=$(date "+%Y%m%d-%H%M")
+LogPath="/Users/$USER/sanitizier/fix-dirs/"$src_base""
+FIND= $(find . -name "*[^A-Za-Z0-9\-\_\.]*" -type d -maxdpeth 1)
+
+#
+# Get directory to be hashed
+clear
+tput setaf 11
+echo -e "|--->    bad names sanitizier    <---|"
+tput setaf 9
+echo -e "|--->    fix bad directories     <---|"
+tput sgr 0
+echo -e "\nThis utility will search for and remove colons in directory names.\nThe colon will be replaced with an underscore."
+echo -e "\nProcess is as follows: "
+echo -e "\t1. define directory to be cleaned up."
+echo -e "\t2. preview directories to be renamed."
+echo -e -n "\n\nDrop directory: "
+read DROP
+
+# Create Log file
+src_base=$(basename "$DROP")
+mkdir -p "$LogPath"
+LOG=""$LogPath"/"$src_base"-$fullDate.txt"
+touch "$LOG"
+
+# Test for bad file names
+cd "$DROP"
+FileCount=$(find . -maxdepth 2 -type d | wc -l | awk '{ print $1 }')
+BFN=$(find . -name "*[^A-Za-z0-9\-\_\.]*" -type d -maxdpeth 1 -print0 | xargs -0 -n 1 >"$LOG")
+COUNT=$(wc -l "$LOG" | awk '{ print $1 }')
+
+# Report results
+tput setaf 9
+echo -e "\n\n\tWorking directory: "$src_base" "
+tput setaf 11
+echo -e "\tdirectory count prior to sanitizaion:\t\t\t$FileCount "
+if [ "$COUNT" != "0" ]; then
+        echo -e "\tnumber of items to be cleaned up:\t\t\t$COUNT "
+else
+        echo -e "\tnumber of items to be cleaned up:$(tput setaf 10)\t\t\t$COUNT "
+        rm -rf "$LOG"
+        tput sgr 0
+        echo -e "\n\nNo Bad directory names found - exiting script."
+        echo -e "\n\n"
+        sleep 3
+        exit
+fi
+tput sgr 0
+
+# Run script
+echo -e -n "\nready to preview? (y) to continue: "
+read CNF
+if [ "$CNF" != "y" ]; then
+        echo -e "Have a nice day\n"
+        rm -rf "$LOG"
+
+        exit
+else
+        cd "$DROP"
+        echo -e "\n\nPreview of "$src_base" directory rename\n\n" | tee -a "$LOG"
+        find . -name "*[^A-Za-z0-9\-\_\.]*" -type d -maxdpeth 2 | while read FILEDIR; do
+                DIR="${FILEDIR}"
+                #FILE="${FILEDIR/*\/}"
+                #NEWFILE="${FILE//[,&<>*?|\":\'()]/_}"
+                NEWDIR="${DIR//[^A-Za-z0-9\-\_\.]/_}"
+                echo -e "\n$DIR\t-->\n$NEWDIR\t<--\n" | tee -a "$LOG"
+        done
+fi
+
+echo -e -n "\nready to rename everything? (y) to continue: "
+read CNF
+if [ "$CNF" != "y" ]; then
+        echo -e "Have a wonderful day\n"
+        rm -rf "$LOG"
+        exit
+else
+        find . -name "*[^A-Za-Z0-9\-\_\.]*" -type d -maxdpeth 2 | while read FILEDIR; do
+                DIR="${FILEDIR}"
+                NEWDIR="${DIR//[^A-Za-Z0-9\-\_\.]/_}"
+                mv -n "$DIR" "$NEWDIR"
+        done
+fi
+PLOG=$LogPath"/"$src_base"-fixed-$fullDate.txt"
+PostFileCount=$(find . -type d -maxdepth 1 | wc -l | awk '{ print $1 }')
+BFN=$(find . -name "*[^A-Za-Z0-9\-\_\.]*" -type d -maxdpeth 1 -print0 | xargs -0 -n 1 >"$PLOG")
+COUNT=$(wc -l "$PLOG" | awk '{ print $1 }')
+
+tput setaf 9
+echo -e "\n\n\tWorking directory: "$src_base" "
+tput setaf 11
+echo -e "\tdirectory count pre sanitizaion:\t\t$FileCount "
+echo -e "\tdirectory count post sanitizaion:\t\t$PostFileCount "
+echo -e "\tnumber of items to be cleaned up:\t\t$COUNT "
+tput sgr 0
+echo -e -n "\nany key to exit: "
+read -n 1
+echo -e "\n\n"
+rm -rf "$PLOG"
+rm -rf "$LOG"
+exit

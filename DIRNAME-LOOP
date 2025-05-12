@@ -1,0 +1,112 @@
+#!/bin/bash
+# sanitize filenames
+# finder allows "/" in directories and filenames but they appear as ":" in shell commands
+# wtf
+
+# Globals
+fullDate=$(date "+%Y%m%d-%H%M")
+LogPath="/Users/$USER/sanitizier/fix-dirs/"$src_base""
+FIND= $(find . -name "*[^A-Za-Z0-9\-\_\.]*" -type d -maxdpeth 1)
+
+#
+# Get directory to be hashed
+clear
+tput setaf 11
+echo -e "|--->    bad names sanitizier    <---|"
+tput setaf 9
+echo -e "|--->    fix bad directories     <---|"
+tput sgr 0
+echo -e "\nThis utility will search for and remove all charaters except A-Z, a-z, 0-9, ., and _."
+echo -e "This is recursive but it will start at depth 1 on the first round and go one level deeper"
+echo -e "into the filesystem until you opt out of the loop."
+echo -e "The resulting direcory names will contain no spaces or any other spercial charaters."
+echo -e "\nProcess is as follows: "
+echo -e "\t1. define directory to be cleaned up."
+echo -e "\t2. preview directories to be renamed."
+echo -e "\t3. Rename directories as shown in the preview."
+echo -e "\t4. ."
+
+echo -e "\n\tRename command will not overwrite. Nonethless, this process is risky and batch renames will"
+echo -e "\tdefinitely break any link between applications and existing paths to files."
+echo -e "\n\tRUse this utility at your own risk..."
+echo -e -n "\n\ndrop directory: "
+read DROP
+count=1
+
+while :; do
+        src_base=$(basename "$DROP")
+        mkdir -p "$LogPath"
+        LOG=""$LogPath"/"$src_base"-$fullDate.txt"
+        touch "$LOG"
+        cd "$DROP"
+        FileCount=$(find . -maxdepth $count -type d | wc -l | awk '{ print $1 }')
+        BFN=$(find . -name "*[^A-Za-z0-9_.\/]*" -type d -maxdepth $count -print0 | xargs -0 -n 1 >"$LOG")
+        COUNT=$(wc -l "$LOG" | awk '{ print $1 }')
+        tput setaf 9
+        echo -e "\n\n\tBase directory: "$src_base" "
+        echo -e "\n\tdepth is: $count\n"
+        tput setaf 11
+        echo -e "\tdirectory count prior to sanitizaion:\t\t\t$FileCount "
+        if [ "$COUNT" != "0" ]; then
+                echo -e "\tnumber of items to be cleaned up:\t\t\t$COUNT "
+        else
+                echo -e "\tnumber of items to be cleaned up:$(tput setaf 10)\t\t\t$COUNT "
+                rm -rf "$LOG"
+                tput sgr 0
+                echo -e "\n\nNo Bad directory names found."
+                echo -e "\n\n"
+                sleep 3
+                exit
+        fi
+        tput sgr 0
+        echo -e -n "\nready to preview? (y) to continue: "
+        read CNF
+        if [ "$CNF" != "y" ]; then
+                echo -e "Have a nice day\n"
+                rm -rf "$LOG"
+
+                exit
+        else
+                cd "$DROP"
+                echo -e "\n\nPreview of "$src_base" directory rename\n\n" | tee -a "$LOG"
+                find . -name "*[^A-Za-z0-9_.\/]*" -type d -maxdepth $count | while read FILEDIR; do
+                        DIR="${FILEDIR}"
+                        NEWDIR="${DIR//[^A-Za-z0-9_.\/]/}"
+                        echo -e "\n$DIR\t-->\n$NEWDIR\t<--\n" | tee -a "$LOG"
+                done
+        fi
+
+        echo -e -n "\nready to rename everything? (y) to continue: "
+        read CNF
+        if [ "$CNF" != "y" ]; then
+                echo -e "Have a wonderful day\n"
+                rm -rf "$LOG"
+                exit
+        else
+                find . -name "*[^A-Za-z0-9_.\/]*" -type d -maxdepth $count | while read FILEDIR; do
+                        DIR="${FILEDIR}"
+                        NEWDIR="${DIR//[^A-Za-z0-9_.\/]/}"
+                        mv -n "$DIR" "$NEWDIR"
+                done
+        fi
+        PLOG=$LogPath"/"$src_base"-fixed-$fullDate.txt"
+        PostFileCount=$(find . -type d -maxdepth $count | wc -l | awk '{ print $1 }')
+        BFN=$(find . -name "*[^A-Za-z0-9_.\/]*" -type d -maxdepth $count -print0 | xargs -0 -n 1 >"$PLOG")
+        COUNT=$(wc -l "$PLOG" | awk '{ print $1 }')
+
+        tput setaf 9
+        echo -e "\n\n\tWorking directory: "$src_base" "
+        tput setaf 11
+        echo -e "\tdirectory count pre sanitizaion:\t\t$FileCount "
+        echo -e "\tdirectory count post sanitizaion:\t\t$PostFileCount "
+        echo -e "\tnumber of items to be cleaned up:\t\t$COUNT "
+        ((count++))
+done
+
+tput sgr 0
+echo -e -n "\nany key to exit: "
+read -n 1
+echo -e "\n\n"
+rm -rf "$PLOG"
+rm -rf "$LOG"
+exit

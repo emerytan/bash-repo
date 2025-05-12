@@ -1,0 +1,203 @@
+#!/bin/bash
+
+#
+#
+#		20130710				#
+#################################
+
+# Global Variables #
+
+# Enter Project Name between quotes in [project=""] below #
+
+project="Your Project Name"
+
+# Enter path for Logs between quotes in [logPath=""] below #
+
+logPath="/path/to/logs"
+
+# Enter Domain between quotes in [domain=""] below #
+
+domain="your.domain"
+
+# Enter the % of space to keep free on archive destination volumes between quotes in [freeSpace=""] below #
+
+bufferSpace="8"
+
+# Enter the term used for the basic unit to be archived (i.e. "Roll") between quotes in [archiveUnit=""] below #
+
+archiveUnit="source"
+
+# Enter the names or patterns of directories (separated by spaces) to exclude between quotes in [excludeDir=""] below #
+
+# excludeDir=".*"
+
+# Enter the names or patterns of directories (separated by spaces) to exclude between quotes in [excludeFile=""] below #
+
+# excludeFile="soundData.xml"
+
+# Functions #
+
+# returns dir ($1) + n ($2) parent folders #
+keepparents() {
+    dir="$1"
+    num="$2"
+    echo $dir | rev | cut -d "/" -f 1-$(expr $num + 1) | rev
+}
+
+# Checks for free space in a dir ($1) and retains n% free space ($2) #
+dfWBuffer() {
+    dir="$1"
+    buffer="$2"
+    bufBlocks=$(echo "($(df -P "$dir" | awk 'NR==2 {print $2}' | xargs -I blocks echo "scale=4; blocks*("$buffer"/100)" | bc) + 0.5) / 1" | bc)
+    echo "($(df -P "$dir" | awk 'NR==2 {print $4}' | xargs -I blocks echo "scale=4; blocks - "$bufBlocks"" | bc) + 0.5) / 1" | bc
+}
+
+# Checks size of dir ($1) #
+dirsize() {
+    dir="$1"
+    du -d 0 $dir | awk '{print $1}'
+}
+
+# Checks that there is enough space for a source dir ($1) to fit in a destination dir ($2) with n% free space left over ($3) #
+enoughspace() {
+    src="$1"
+    dst="$2"
+    buffer="$3"
+    srcSize=$(du -s "${src}" | awk '{print $1}')
+    bufBlocks=$(echo "($(df -P "$dst" | awk 'NR==2 {print $2}' | xargs -I blocks echo "scale=4; blocks*("$buffer"/100)" | bc) + 0.5) / 1" | bc)
+    dstWBuffer=$(echo "$(df -P "$dst" | awk 'NR==2 {print $4}' | xargs -I blocks echo "blocks - "$bufBlocks"" | bc)")
+    if [ "$srcSize" -le "$dstWBuffer" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# MAIN CODE #
+unset IFS
+clear
+echo -e "$(tput setaf 3)LTFS Archive Utility$(tput sgr0)\n"
+echo -e -n "\nEnter a short description for this archive (three words or less): "
+read -e userName
+
+# Get Source
+clear
+
+# echo -e -n "Please drag the $archiveUnit folder to window and press [ENTER]: "
+# read -e inpSrc
+# origSrc=${inpSrc#"'"}
+# origSrc=${origSrc%"'"}
+
+cd /path/to/your/source
+origSrc=$(zenity --file-selection --directory --title="Please select a folder")
+srcBase=$(basename "$origSrc")
+
+#echo -e -n "\n\nHow many parent directories would you like to retain?  Please enter a # and press [ENTER]: "
+#read -e parentCount
+parentCount=0
+
+# Get Destination #
+
+origDst=$(df -h | awk '/ltfs/ { print $6 }')
+dstBase=$(basename "$origDst")
+dstRoot=$(echo "$origDst" | cut -d "/" -f 1-3)
+dstPath=""$origDst"/$(keepparents "$origSrc" "$parentCount")"
+
+# Check for vbCode #
+
+#if [ -f $dstRoot/.vbCode ]; then
+
+#    vbCode=`awk 'NR==1 { print $1 }' $dstRoot/.vbCode`
+#    elif [ $(mount | awk ' $0 ~ "'"$dstRoot"'" { print $1 }') == "ltfs" ]; then
+#    touch $dstRoot/.vbCode
+#    xattr $dstRoot ltfs.volumeSerial > $dstRoot/.vbCode
+#    vbCode=$(awk 'NR==1 { print $1 }' $dstRoot/.vbCode)
+#    else
+#    touch $dstRoot/.vbCode
+#    echo -e -n "\n\nPlease enter the barcode of $dstBase:  "
+#    read -e vbCode
+#    echo "$vbCode" > $dstRoot/.vbCode
+#    vbCode=$(awk 'NR==1 { print $1 }' $dstRoot/.vbCode)
+#fi
+
+# Confirm #
+
+clear
+echo -e -n "Are you sure you want to archive $srcBase to LTFS tape $dstBase? Enter (y or n): "
+read -e confirm
+if [ "$confirm" == "y" ]; then
+    echo -e -n "$(tput setaf 4)ok, checking free space"
+    sleep 2
+    # Check for free space #
+    if $(enoughspace "${origSrc}" "${origDst}" "${bufferSpace}"); then
+        # Change status color to yellow#
+        # Create Log #
+        fullDate=$(date "+%Y%m%d")
+        log="${logPath}/"${dstBase}"/"${dstBase}"-"${srcBase}"-$fullDate.txt"
+        mkdir -p "${logPath}/${dstBase}"
+        touch ${log}
+        # Determine if LTFS tape #
+        if [ $(mount | awk ' $0 ~ "'"$dstRoot"'" { print $1 }') == "ltfs" ]; then
+            # Write Log Header #
+            ltfsVrsn=$(ltfs -V 2>&1)
+            SIZE=$(du -shc "${origSrc}")
+            echo -e "\n\n${project} Archive Log\n\n" | tee -a "$log"
+            echo -e "Tape Archives written using:\n$ltfsVrsn\n" | tee -a "$log"
+            echo -e "\tArchive Reference: "${userName}"" | tee -a "$log"
+            echo -e "\tDate: $fullDate" | tee -a "$log"
+        else
+            echo -e "\n\n${project} Archive Log\n\n" | tee -a "$log"
+            echo -e "\tArchive Reference: "${userName}"" | tee -a "$log"
+            echo -e "\tDate: $fullDate" | tee -a "$log"
+        fi
+        echo -e "\t$archiveUnit: "${srcBase}" " | tee -a "$log"
+        echo -e "\tTarget Directory: $(dirname "${dstPath}")\n\n" | tee -a "$log"
+        echo -e "Basic Contents: " | tee -a "$log"
+        cd "${origSrc}"
+        du -shc * | tee -a "$log"
+        echo -e "\n\n"
+        # Copy #
+        mkdir -p "${dstPath}"
+        # Create list of exclusions #
+        excludeList="$excludeDir $excludeFile"
+        excludePattern=""
+        for excludeItem in $(echo "$excludeList" | sed 's/[^ ][^ ]*/"&"/g'); do
+            excludePattern="$excludePattern --exclude $excludeItem"
+        done
+        sudo rsync -rptWvh "${origSrc}"/ "${dstPath}" 2>&1
+        # Count Files #
+        # Create list of exclusions #
+        excludeDirPattern=""
+        for excludeItem in $(echo "$excludeDir" | sed 's/[^ ][^ ]*/"*\/&\/*"/g'); do
+            excludeDirPattern="$excludeDirPattern ! -ipath $excludeItem"
+        done
+        excludeFilePattern=""
+        for excludeItem in $(echo "$excludeFile" | sed 's/[^ ][^ ]*/"&"/g'); do
+            excludeFilePattern="$excludeFilePattern ! -iname $excludeItem"
+        done
+        # Count #
+        echo -e "Post archive filecounts: "
+        srcNum=$(find "$origSrc" -type f \( $excludeFilePattern$excludeDirPattern \) | wc -l)
+        echo -e "\n\nTotal Files On Source: $srcNum" | tee -a "$log"
+        dstNum=$(find "$dstPath" -type f \( $excludeFilePattern$excludeDirPattern \) | wc -l)
+        echo -e "Total Files On Dest:   $dstNum\n\n" | tee -a "$log"
+        if [ $dstNum = $srcNum ]; then
+            echo -e "$(tput setaf 2)\n\nSucess!! File counts match, archive of ${srcBase} is complete$(tput sgr0)\n\n" | tee -a "$log"
+        else
+            echo -e "$(tput setaf 1)\n\nFile counts do not match, something could be wrong.$(tput sgr0)\n\n" | tee -a "$log"
+        fi
+    else
+        echo -e "$(tput setaf 1)\n\nNot enough space available on $dstBase, please start over with a new destination\n\n"
+        echo -e "\n\nCanceling Archive$(tput sgr0)\n\n"
+    fi
+else
+    echo -e "\n\nCanceling Archive\n\n"
+    exit
+fi
+
+# Finish #
+
+echo -e -n "$(tput setaf 2)All done, hit any key to exit...$(tput sgr0) "
+read -n 1
+echo -e "\n\n"
+exit

@@ -1,0 +1,196 @@
+#!/bin/bash
+
+#
+#       Emery Anderson          #
+#		20130710				#
+#################################
+
+# Global Variables #
+
+# Enter Project Name between quotes in [project=""] below #
+
+project="Your Project Name"
+
+# Enter path for Logs between quotes in [logPath=""] below #
+
+logPath="your/logs/path"
+
+# Enter Domain between quotes in [domain=""] below #
+
+domain="your.domain"
+
+# Enter the % of space to keep free on archive destination volumes between quotes in [freeSpace=""] below #
+
+bufferSpace="5"
+
+# Enter the term used for the basic unit to be archived (i.e. "Roll") between quotes in [archiveUnit=""] below #
+
+archiveUnit="source"
+
+# Enter the names or patterns of directories (separated by spaces) to exclude between quotes in [excludeDir=""] below #
+
+excludeDir=".*"
+
+# Enter the names or patterns of directories (separated by spaces) to exclude between quotes in [excludeFile=""] below #
+
+excludeFile=""
+
+# Functions #
+
+# returns dir ($1) + n ($2) parent folders #
+keepparents() {
+	dir="$1"
+	num="$2"
+	echo $dir | rev | cut -d "/" -f 1-$(expr $num + 1) | rev
+}
+
+# Checks for free space in a dir ($1) and retains n% free space ($2) #
+dfWBuffer() {
+	dir="$1"
+	buffer="$2"
+	bufBlocks=$(echo "($(df -P "$dir" | awk 'NR==2 {print $2}' | xargs -I blocks echo "scale=4; blocks*("$buffer"/100)" | bc) + 0.5) / 1" | bc)
+	echo "($(df -P "$dir" | awk 'NR==2 {print $4}' | xargs -I blocks echo "scale=4; blocks - "$bufBlocks"" | bc) + 0.5) / 1" | bc
+}
+
+# Checks size of dir ($1) #
+dirsize() {
+	dir="$1"
+	du -d 0 $dir | awk '{print $1}'
+}
+
+# Checks that there is enough space for a source dir ($1) to fit in a destination dir ($2) with n% free space left over ($3) #
+enoughspace() {
+	src="$1"
+	dst="$2"
+	buffer="$3"
+	srcSize=$(du -s "${src}" | awk '{print $1}')
+	bufBlocks=$(echo "($(df -P "$dst" | awk 'NR==2 {print $2}' | xargs -I blocks echo "scale=4; blocks*("$buffer"/100)" | bc) + 0.5) / 1" | bc)
+	dstWBuffer=$(echo "$(df -P "$dst" | awk 'NR==2 {print $4}' | xargs -I blocks echo "blocks - "$bufBlocks"" | bc)")
+	if [ "$srcSize" -le "$dstWBuffer" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+# MAIN CODE #
+unset IFS
+clear
+echo -e "$(tput setaf 3)LTFS Tape Restore Utility$(tput sgr0)\n"
+
+# Get tape contents #
+tapeID=$(ls /mnt/ltfs)
+rm -rf /tmp/tapelogs/*
+mkdir -p /tmp/tapelogs
+rsync -rptWv --dry-run /mnt/ltfs/$tapeID /RAID/shares/home/sharepoint/ >>/tmp/tapelogs/$tapeID.txt
+
+# Zenity
+STEPS=$(cat /usr/share/etap/steps)
+zenity --info --title="ODZ LTFS Restore" --text="$(
+	echo -e "$STEPS"
+	echo -e "\nRoot directories for $tapeID\n"
+	cd /mnt/ltfs/$tapeID/
+	du -shc *
+	echo -e "\nPlease note: you can only restore one file or folder at a time.\nClick OK to continue"
+)"
+cd /mnt/ltfs/$tapeID
+echo -e "$tapeID contents:\n"
+du -shc *
+
+# search tape log and get source #
+TIPS=$(cat /usr/share/etap/restore-text)
+FILE="/tmp/tapelogs/$tapeID.txt"
+FILENAME=$(basename "${FILE}")
+pattern=$(zenity --entry --title="ODZ TAPE RESTORE" --text="$(
+	echo -e "$TIPS\n"
+	echo -e "Search "$tapeID" for: "
+)" --width=800)
+RESLT=$(cat $FILE | awk -v pat="$pattern" '$0 ~ pat { print }')
+MATCHES=$(cat $FILE | awk -v pat="$pattern" '$0 ~ pat { nmatches++ } END { print nmatches }')
+inpSrc=$(echo -e "${RESLT}" | zenity --list --title="select the item to restore" --column="$MATCHES matches" --width=1200 --height=600)
+origSrc="/mnt/ltfs/"${inpSrc}""
+srcBase=$(basename "${inpSrc}")
+
+# Get Destination #
+if [ -f "${origSrc}" ]; then
+	parentCount=0
+else
+	parentCount=1
+fi
+origDst="/RAID/shares/home/sharepoint"
+dstBase=$(basename "$origDst")
+dstRoot=$(echo "$origDst" | cut -d "/" -f 1-3)
+dstPath=""$origDst"/$(keepparents "$origSrc" "$parentCount")"
+
+# Check for free space #
+clear
+echo -e "Checking free space"
+if $(enoughspace "${origSrc}" "${origDst}" "${bufferSpace}"); then
+	echo -e "resulting copy is within buffer space: ${bufferSpace}% of full capacity."
+
+	# Create list of exclusions #
+	excludeList="$excludeDir $excludeFile"
+	excludePattern=""
+	for excludeItem in $(echo "$excludeList" | sed 's/[^ ][^ ]*/"&"/g'); do
+		excludePattern="$excludePattern --exclude $excludeItem"
+	done
+
+	# restore file #
+	if [ -f "${origSrc}" ]; then
+		sleep 2
+		zenity --question --width=900 --title="$(echo -e "file to restore:\t"${origSrc}"")" --text="$(echo -e "\n\nclick OK to proceed ")"
+		confirm=$(echo $?)
+		if [ "$confirm" != "0" ]; then
+			exit 1
+		fi
+		dstPath="$origDst/restored-files/$tapeID"
+		mkdir -p "${dstPath}"
+		cp -v "${origSrc}" "${dstPath}" 2>&1 | zenity --progress --title="Restoring "${srcBase}"" --width=900 --text="copying to: "${dstPath}"" --auto-close
+		echo -e -n "$(tput setaf 2)All done, hit any key to exit...$(tput sgr0) "
+		read -n 1
+		echo -e "\n\n"
+		sleep 4
+		exit
+	else
+		# restore directory #
+		zenity --question --width=900 --title="Restore a directory" --text="$(
+			echo -e "\nSource path:\t"${origSrc}""
+			echo -e "Restore path:\t"${dstPath}""
+			echo -e "\n\nclick OK to proceed "
+		)"
+		confirm=$(echo $?)
+		if [ "$confirm" != "0" ]; then
+			exit 1
+		fi
+		mkdir -p "${dstPath}"
+		rsync -avhi --progress "${origSrc}" "${dstPath}" 2>&1 | zenity --progress --width=700 --title="Restoring "${srcBase}"" --text="copying to: "${dstPath}"" --auto-close
+	fi
+	# count excluded files #
+	excludeDirPattern=""
+	for excludeItem in $(echo "$excludeDir" | sed 's/[^ ][^ ]*/"*\/&\/*"/g'); do
+		excludeDirPattern="$excludeDirPattern ! -ipath $excludeItem"
+	done
+	excludeFilePattern=""
+	for excludeItem in $(echo "$excludeFile" | sed 's/[^ ][^ ]*/"&"/g'); do
+		excludeFilePattern="$excludeFilePattern ! -iname $excludeItem"
+	done
+	# Count included files #
+	srcNum=$(find "${origSrc}" -type f \( $excludeFilePattern$excludeDirPattern \) | wc -l)
+	echo -e "\n\nTotal Files On Source: $srcNum"
+	dstNum=$(find "${dstPath}" -type f \( $excludeFilePattern$excludeDirPattern \) | wc -l)
+	echo -e "Total Files On Dest:   $dstNum\n\n"
+	if [ $dstNum = $srcNum ]; then
+		echo -e "$(tput setaf 2)\n\nRestore of ${srcBase} complete$(tput sgr0)\n\n"
+	else
+		echo -e "$(tput setaf 1)\n\nFile counts do not match, please check that the archive is complete$(tput sgr0)\n\n"
+	fi
+else
+	echo -e "$(tput setaf 1)\n\nNot enough space available on $dstBase"
+	echo -e "Canceling Job.$(tput sgr0)\n\n"
+fi
+# finish #
+echo -e -n "$(tput sgr0)All done, hit any key to exit... "
+read -n 1
+echo -e "\n\n"
+sleep 4
+exit
